@@ -1,3 +1,4 @@
+import React, { useState } from 'react';
 import './App.css';
 import Button from 'react-bootstrap/Button';
 import Card from 'react-bootstrap/Card';
@@ -628,45 +629,112 @@ const ADDRESS = "0x9d1149476e76974d0a5a80a0da97d3f296c1e148";
 var account = null;
 var contract = null;
 
-async function connectwallet() {
-    if (typeof window !== 'undefined' && typeof window.ethereum !== 'undefined') {
-        var web3 = new Web3(window.ethereum);
-        await window.ethereum.request({ method: 'eth_requestAccounts' });
-        var accounts = await web3.eth.getAccounts();
-        account = accounts[0];
-        document.getElementById('wallet-address').textContent = account;
-        contract = new web3.eth.Contract(ABI, ADDRESS);
-    } else {
-        alert("MetaMask tidak terdeteksi. Silakan install MetaMask.");
+// Komponen untuk menampilkan galeri NFT
+const NftGallery = ({ nfts }) => {
+    if (nfts.length === 0) {
+        return null; // Jangan tampilkan apa-apa jika tidak ada NFT
     }
-}
 
-async function mint() {
-    if (!contract) {
-        alert("Contract belum terhubung. Silakan sambungkan dompet terlebih dahulu.");
-        return;
-    }
-    
-    if (typeof window !== 'undefined' && typeof window.ethereum !== 'undefined') {
-        var _mintAmount = Number(document.querySelector("[name=amount]").value);
-        var mintRate = Number(await contract.methods.cost().call());
-        var totalAmount = mintRate * _mintAmount;
+    return (
+        <div className="mt-4">
+            <h4 className="text-center">Galeri Saya</h4>
+            <div className="d-flex flex-wrap justify-content-center">
+                {nfts.map((nft, index) => (
+                    <Card key={index} className="m-2" style={{ width: '12rem', backgroundColor: '#333' }}>
+                        <Card.Img variant="top" src={nft.image} />
+                        <Card.Body>
+                            <Card.Title className="text-white text-center small">{nft.name}</Card.Title>
+                        </Card.Body>
+                    </Card>
+                ))}
+            </div>
+        </div>
+    );
+};
 
-        contract.methods.mint(account, _mintAmount).send({
-            from: account,
-            value: String(totalAmount)
-        }).on("transactionHash", function(hash){
-            alert("Minting berhasil! Tx Hash: " + hash);
-        }).on("error", function(error) {
-            alert("Minting gagal: " + error.message);
-        });
-    }
-}
 
 function App() {
+    const [nfts, setNfts] = useState([]);
+
+    async function connectwallet() {
+        if (typeof window !== 'undefined' && typeof window.ethereum !== 'undefined') {
+            try {
+                const web3 = new Web3(window.ethereum);
+                const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
+                account = accounts[0];
+                document.getElementById('wallet-address').textContent = account;
+                contract = new web3.eth.Contract(ABI, ADDRESS);
+                fetchMyNfts(account); // Panggil fungsi untuk mengambil NFT setelah connect
+            } catch (error) {
+                alert("Gagal menghubungkan dompet: " + error.message);
+            }
+        } else {
+            alert("MetaMask tidak terdeteksi. Silakan install MetaMask.");
+        }
+    }
+
+    async function fetchMyNfts(ownerAddress) {
+        if (!contract) return;
+        try {
+            console.log("Mulai mengambil NFT untuk:", ownerAddress);
+            const tokenIds = await contract.methods.walletOfOwner(ownerAddress).call();
+            console.log("Token ID yang dimiliki:", tokenIds);
+
+            if (tokenIds.length === 0) {
+                setNfts([]);
+                return;
+            }
+
+            const gateway = "https://silver-useful-peafowl-55.mypinata.cloud/ipfs/";
+            // Ini adalah hash dari folder di Pinata
+            const baseUriHash = "bafybeib7hgt7qcne4kyegqrtk2er666l7wdmo3ghspi6syg2bf2xphzoia/";
+
+            const nftsData = tokenIds.map(tokenId => {
+                const id = tokenId.toString();
+                return {
+                    name: `NFT #${id}`,
+                    image: `${gateway}${baseUriHash}${id}.png`
+                };
+            });
+
+            console.log("Data NFT yang sudah diformat:", nftsData);
+            setNfts(nftsData);
+
+        } catch (error) {
+            console.error("Gagal mengambil NFT:", error);
+            alert("Gagal mengambil data NFT Anda.");
+        }
+    }
+
+    async function mint() {
+        if (!contract) {
+            alert("Contract belum terhubung. Silakan sambungkan dompet terlebih dahulu.");
+            return;
+        }
+        
+        if (typeof window !== 'undefined' && typeof window.ethereum !== 'undefined') {
+            try {
+                const _mintAmount = Number(document.querySelector("[name=amount]").value);
+                const mintRate = await contract.methods.cost().call();
+                const totalAmount = BigInt(mintRate) * BigInt(_mintAmount);
+
+                await contract.methods.mint(account, _mintAmount).send({
+                    from: account,
+                    value: totalAmount.toString()
+                });
+                
+                alert("Minting berhasil!");
+                fetchMyNfts(account); // Ambil ulang daftar NFT setelah minting berhasil
+
+            } catch (error) {
+                alert("Minting gagal: " + error.message);
+            }
+        }
+    }
+
     return (
-        <div className="d-flex justify-content-center align-items-center vh-100 bg-dark text-white">
-            <Card className="p-4 shadow-lg" style={{ borderRadius: "15px", backgroundColor: "#222" }}>
+        <div className="d-flex flex-column justify-content-center align-items-center min-vh-100 bg-dark text-white p-3">
+            <Card className="p-4 shadow-lg" style={{ borderRadius: "15px", backgroundColor: "#222", maxWidth: '500px' }}>
                 <Card.Body>
                     <h4 style={{color:"#FFFFFF"}} className="text-center">Mint Portal</h4>
                     <h6 style={{color:"#FFFFFF"}} className="text-center mb-4">Please Connect Your Wallet</h6>
@@ -680,6 +748,8 @@ function App() {
                     <p className="text-center mt-3">Price: <strong>0.05 ETH</strong> each mint</p>
                 </Card.Body>
             </Card>
+            
+            <NftGallery nfts={nfts} />
         </div>
     );
 }
